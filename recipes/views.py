@@ -564,4 +564,3 @@ class MealPlanCreateView(APIView):
             "meals": serializer.data
         }, status=status.HTTP_201_CREATED)
 
-    from django.shortcuts import render
