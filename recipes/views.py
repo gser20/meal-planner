@@ -25,7 +25,7 @@ from django.db.models import F
 from django.db.models.functions import Cast
 from .serializers import RecipeReviewSerializer
 
-@api_view(["POST"])#ayusin
+@api_view(["POST"])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def plan_meals(request):
