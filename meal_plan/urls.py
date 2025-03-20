@@ -20,17 +20,17 @@ from django.urls import path, include
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,  # To get access & refresh tokens
-    TokenRefreshView,  # To refresh access token
-    TokenVerifyView  # To verify token validity
+    TokenObtainPairView,  
+    TokenRefreshView,  
+    TokenVerifyView  
 )
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('auth/', include('djoser.urls')),
-    path('auth/jwt/login/', TokenObtainPairView.as_view(), name='jwt-login'),  # Login to get tokens
-    path('auth/jwt/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),  # Refresh token
-    path('auth/jwt/verify/', TokenVerifyView.as_view(), name='jwt-verify'),  # Verify token
+    path('auth/jwt/login/', TokenObtainPairView.as_view(), name='jwt-login'),  
+    path('auth/jwt/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),  
+    path('auth/jwt/verify/', TokenVerifyView.as_view(), name='jwt-verify'),  
     path('api/', include('recipes.urls')),
 
 ]
