@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import MealPlan, Recipe
-from .models import UserPreferences  # ✅ Import the missing model
+from .models import UserPreferences
 from .models import DietaryFilter
 from .models import IngredientSubstitute
 from .models import RecipeReview
@@ -16,19 +16,20 @@ class DietaryFilterSerializer(serializers.ModelSerializer):
 class RecipeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Recipe
-        fields = '__all__'  # ✅ Include all recipe details
+        fields = '__all__'
 
 class MealPlanSerializer(serializers.ModelSerializer):
-    user = serializers.StringRelatedField()  # Show username instead of user ID
-    recipes = RecipeSerializer(many=True)  # ✅ Show full recipe details instead of just IDs
+    """Serializer for MealPlan objects"""
+    recipes = RecipeSerializer(many=True, read_only=True)
 
     class Meta:
         model = MealPlan
-        fields = ['id', 'user', 'date', 'recipes']
+        fields = ["id", "user", "date", "recipes"]
+        read_only_fields = ["user", "recipes"]
 class UserPreferencesSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserPreferences
-        fields = '__all__'  # Include all fields
+        fields = '__all__'
 
 class IngredientSubstituteSerializer(serializers.ModelSerializer):
     class Meta:
@@ -44,8 +45,4 @@ class RecipeReviewCreateSerializer(serializers.ModelSerializer):
         if value < 0 or value > 5:
             raise serializers.ValidationError("Rating must be between 0 and 5.")
         return value
-class RecipeReviewSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = RecipeReview
-        fields = ['id', 'recipe', 'user', 'rating', 'review_text', 'created_at']
-        read_only_fields = ['user', 'created_at']  # ✅ Ensure `user` is read-only
+

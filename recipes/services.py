@@ -10,8 +10,6 @@ from .models import Recipe, MealPlan, IngredientSubstitute, DietaryFilter
 from .serializers import RecipeSerializer, MealPlanSerializer, IngredientSubstituteSerializer, DietaryFilterSerializer
 from rest_framework.permissions import IsAuthenticated
 
-
-# ✅ Generate Shopping List
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def generate_shopping_list(request):
@@ -35,7 +33,6 @@ def generate_shopping_list(request):
     return Response({"shopping_list": formatted_list}, status=status.HTTP_200_OK)
 
 
-# ✅ Get Nutritional Summary
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_nutritional_summary(request, recipe_id):
@@ -48,7 +45,6 @@ def get_nutritional_summary(request, recipe_id):
         return Response({"detail": "Recipe not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
-# ✅ Get Ingredient Substitute
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_ingredient_substitute(request, ingredient):
@@ -62,7 +58,7 @@ def get_ingredient_substitute(request, ingredient):
                         status=status.HTTP_404_NOT_FOUND)
 
 
-# ✅ Add Ingredient Substitute
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def add_ingredient_substitute(request):
@@ -73,7 +69,7 @@ def add_ingredient_substitute(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ✅ Rate Recipe
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def rate_recipe(request, id):
@@ -89,7 +85,7 @@ def rate_recipe(request, id):
         return Response({'detail': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ✅ Get Popular Recipes
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_popular_recipes(request):
@@ -97,7 +93,7 @@ def get_popular_recipes(request):
     return Response(RecipeSerializer(recipes, many=True).data, status=status.HTTP_200_OK)
 
 
-# ✅ Add to Favorites
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def add_to_favorites(request, id):
@@ -111,14 +107,14 @@ def add_to_favorites(request, id):
         return Response({"detail": "Recipe not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
-# ✅ Get Dietary Filters
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dietary_filters(request):
     return Response(DietaryFilterSerializer(DietaryFilter.objects.all(), many=True).data, status=status.HTTP_200_OK)
 
 
-# ✅ Get Today's Meal Plan
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_today_meal_plan(request):
@@ -128,30 +124,18 @@ def get_today_meal_plan(request):
     return Response(MealPlanSerializer(meal_plan).data, status=status.HTTP_200_OK)
 
 
-# ✅ Weekly Meal Plan
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def weekly_meal_plan(request):
-    try:
-        start_date = date.fromisoformat(request.data.get("start_date"))
-    except (TypeError, ValueError):
-        return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+def get_weekly_meal_plan(user):
+    """Fetches the user's meal plan for the current week."""
+    start_date = timezone.now().date()
+    end_date = start_date + timedelta(days=6)
 
-    user = request.user
-    meal_plans = []
-    for i in range(7):
-        meal_date = start_date + timedelta(days=i)
-        recipes = Recipe.objects.order_by('?')[:3]
-        if not recipes.exists():
-            return Response({"error": "No recipes available."}, status=status.HTTP_400_BAD_REQUEST)
-        meal_plan = MealPlan.objects.create(user=user, date=meal_date)
-        meal_plan.recipes.set(recipes)
-        meal_plan.save()
-        meal_plans.append(meal_plan)
-    return Response(MealPlanSerializer(meal_plans, many=True).data, status=status.HTTP_201_CREATED)
+    meal_plans = MealPlan.objects.filter(user=user, date__range=[start_date, end_date])
+    if not meal_plans.exists():
+        return None, {"error": "No meal plans found for this week."}
+
+    return MealPlanSerializer(meal_plans, many=True).data, None
 
 
-# ✅ Recipe Views
 class RecipeRecommendationsView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -163,3 +147,97 @@ class RecipeRecommendationsView(APIView):
             return Response(RecipeSerializer(recommended_recipes, many=True).data, status=status.HTTP_200_OK)
         except Recipe.DoesNotExist:
             return Response({"detail": "Recipe not found."}, status=status.HTTP_404_NOT_FOUND)
+
+def get_random_recipe():
+    """Fetches a random recipe from the database."""
+    return Recipe.objects.order_by('?').first()
+
+
+def search_recipes_by_ingredients(ingredients):
+    """Finds recipes that contain all the given ingredients."""
+    ingredient_list = [ingredient.strip().lower() for ingredient in ingredients.split(',')]
+
+    query = Q()
+    for ingredient in ingredient_list:
+        query &= Q(ingredients__icontains=ingredient)
+
+    return Recipe.objects.filter(query).distinct()
+
+
+def update_preferences(user, data):
+    """Updates the user's dietary preferences."""
+    preferences, created = UserPreferences.objects.get_or_create(user=user)
+    preferences.dietary_preferences = data.get('dietary_preferences', {})
+    preferences.save()
+
+    return UserPreferencesSerializer(preferences).data
+def suggest_recipes(leftovers):
+    """Suggests recipes based on provided leftover ingredients."""
+    if not leftovers:
+        return {"detail": "No leftover ingredients provided."}, 400
+
+    leftovers = [ingredient.lower().strip() for ingredient in leftovers]
+
+    # Find recipes that contain at least one of the ingredients
+    suggested_recipes = Recipe.objects.filter(ingredients__icontains=leftovers[0]).distinct()
+
+    # Refine the search for multiple ingredients
+    for ingredient in leftovers[1:]:
+        suggested_recipes = suggested_recipes.filter(ingredients__icontains=ingredient)
+
+    if not suggested_recipes.exists():
+        return {"detail": "No recipes found using the provided ingredients."}, 404
+
+    return RecipeSerializer(suggested_recipes, many=True).data, 200
+def get_user_meal_history(user):
+    """Retrieves the user's meal history and recommends new recipes."""
+    meal_plans = MealPlan.objects.filter(user=user).order_by('-date')
+
+    if not meal_plans.exists():
+        return {"detail": "No meal history found."}, 404
+
+    meal_plan_data = MealPlanSerializer(meal_plans, many=True).data
+
+    # Get recipe IDs from the user's meal history
+    recipe_ids = meal_plans.values_list('recipes', flat=True)
+
+    # Recommend recipes NOT already in the user's history
+    recommended_recipes = Recipe.objects.exclude(id__in=recipe_ids).annotate(
+        rating_count=Count('rating')
+    ).order_by('-rating', '-rating_count')[:5]
+
+    recommended_data = RecipeSerializer(recommended_recipes, many=True).data
+
+    return {"meal_history": meal_plan_data, "recommended_recipes": recommended_data}, 200
+def get_recipe_nutritional_summary(recipe_id):
+    """Fetches nutritional details for a specific recipe."""
+    try:
+        recipe = Recipe.objects.get(pk=recipe_id)
+        nutrition = recipe.nutrition
+        summary = {
+            "calories": nutrition.get("calories", "N/A"),
+            "protein": nutrition.get("protein", "N/A"),
+            "carbohydrates": nutrition.get("carbohydrates", "N/A"),
+            "fat": nutrition.get("fat", "N/A"),
+            "fiber": nutrition.get("fiber", "N/A")
+        }
+        return {"recipe": recipe.title, "nutritional_summary": summary}, 200
+
+    except Recipe.DoesNotExist:
+        return {"detail": "Recipe not found."}, 404
+def get_recipe_reviews(recipe_id):
+    recipe = get_object_or_404(Recipe, id=recipe_id)
+    reviews = RecipeReview.objects.filter(recipe=recipe)
+    if not reviews.exists():
+        return Response({"message": "No ratings yet"}, status=status.HTTP_200_OK)
+    serializer = RecipeReviewSerializer(reviews, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+def create_recipe_review(recipe_id, user, data):
+    recipe = get_object_or_404(Recipe, id=recipe_id)
+    data["recipe"] = recipe_id
+    serializer = RecipeReviewSerializer(data=data, context={"request": user})
+    if serializer.is_valid():
+        serializer.save(user=user, recipe=recipe)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

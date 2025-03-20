@@ -5,7 +5,7 @@ from .views import( RecipeSearchByIngredientsView, MealPlanCreateView, RecipeCre
                     get_ingredient_substitute,  RecipeReviewView, search_by_nutrition, get_meal_history, suggest_recipes_from_leftovers, generate_shopping_list, add_ingredient_substitute, get_nutritional_summary)   # Import the view
 
 urlpatterns = [
-    path('meal-planner/plan/', MealPlanCreateView.as_view(), name='meal-plan-create'),  # ✅ Ensure this is correct
+    path('meal-planner/plan/', MealPlanCreateView.as_view(), name='meal-plan-create'),
     path('recipes/create/', RecipeCreateView.as_view(), name='recipe-create'),
     path('recipes/<int:pk>/update/', RecipeUpdateView.as_view(), name='recipe-update'),
     path('recipes/', RecipeListView.as_view(), name='recipe-list'),
@@ -30,8 +30,6 @@ urlpatterns = [
     path('leftover-recipes/plan/', suggest_recipes_from_leftovers, name='leftover-recipes-plan'),
     path('meal-history/', get_meal_history, name='get-meal-history'),
     path('recipes/search-by-nutrition/', search_by_nutrition, name='search-by-nutrition'),
-#    path('recipes/<int:id>/reviews/', get_recipe_reviews, name='get-recipe-reviews'),
- #   path('recipes/<int:id>/reviews/', add_recipe_review, name='add-recipe-review'),
     path('recipes/<int:recipe_id>/reviews/', RecipeReviewView.as_view(), name='recipe-reviews'),
 
 ]

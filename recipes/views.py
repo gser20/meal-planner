@@ -13,7 +13,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.decorators import authentication_classes
 from datetime import date, timedelta
 from .models import UserPreferences
-from .serializers import UserPreferencesSerializer  # ✅ Import the missing serializer
+from .serializers import UserPreferencesSerializer
 from .models import DietaryFilter
 from .serializers import DietaryFilterSerializer
 import logging
@@ -25,123 +25,95 @@ from django.db.models import F
 from django.db.models.functions import Cast
 from .serializers import RecipeReviewSerializer
 
-@api_view(['POST']) # may error pa ito
-@authentication_classes([JWTAuthentication])  # ✅ Use JWT Authentication
+@api_view(["POST"])#ayusin
+@authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def plan_meals(request):
     data = request.data
-    date = data.get("date")  # ✅ Extract date from request
+    date_str = data.get("date")
 
-    if not date:
+    if not date_str:
         return Response({"error": "Date is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ✅ Fetch recipes (you can modify this logic)
-    recipes = Recipe.objects.all()[:3]
+    date = parse_date(date_str)
+    if not date:
+        return Response({"error": "Invalid date format, use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not recipes:
-        return Response({"error": "No recipes found"}, status=status.HTTP_400_BAD_REQUEST)
+    if MealPlan.objects.filter(user=request.user, date=date).exists():
+        return Response({"error": "Meal plan already exists for this date"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ✅ Create a MealPlan object with the correct 'date'
+    user_preferences = UserPreferences.objects.filter(user=request.user).first()
+    dietary_tags = user_preferences.dietary_preferences.get("tags", []) if user_preferences else []
+
+    if dietary_tags:
+        recipes = Recipe.objects.filter(dietary_tags__overlap=dietary_tags)[:3]
+    else:
+        recipes = Recipe.objects.all()[:3]
+
+    if not recipes.exists():
+        return Response({"error": "No suitable recipes found based on your preferences"}, status=status.HTTP_404_NOT_FOUND)
+
     meal_plan = MealPlan.objects.create(user=request.user, date=date)
-    meal_plan.recipes.set(recipes)  # ✅ Correctly set related recipes
+    meal_plan.recipes.set(recipes)
     meal_plan.save()
 
-    # ✅ Serialize the response
+    print(f"MealPlan object: {meal_plan.__dict__}")
+
+    # 🚀 Debugging: Print the serialized MealPlan data
     serializer = MealPlanSerializer(meal_plan)
+    print(f"Serialized MealPlan Data: {json.dumps(serializer.data, indent=2)}")
+
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_dietary_filters(request):
+    filters = DietaryFilter.objects.all()
+    serializer = DietaryFilterSerializer(filters, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
-
-@api_view(['POST']) # may error pa ito
-@permission_classes([IsAuthenticated])  # ✅ Requires authentication
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def update_user_preferences(request):
-    user = request.user  # ✅ Get the authenticated user
+    user = request.user
     data = request.data
-
-    # Ensure user-specific preferences
     preferences, created = UserPreferences.objects.get_or_create(user=user)
-
     preferences.dietary_preferences = data.get('dietary_preferences', {})
     preferences.save()
-
     serializer = UserPreferencesSerializer(preferences)
     return Response(serializer.data, status=status.HTTP_200_OK)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # ✅ Requires authentication
+@permission_classes([IsAuthenticated])
 def get_week_meal_plan(request):
-    start_date = timezone.now().date()  # Today
-    end_date = start_date + timedelta(days=6)  # Next 7 days
-    user = request.user  # ✅ Authenticated user
-
-    # Fetch meal plans for the authenticated user for the week
+    start_date = timezone.now().date()
+    end_date = start_date + timedelta(days=6)
+    user = request.user
     meal_plans = MealPlan.objects.filter(user=user, date__range=[start_date, end_date])
-
     if not meal_plans.exists():
         return Response({'detail': 'No meal plans found for this week.'}, status=status.HTTP_404_NOT_FOUND)
-
     serializer = MealPlanSerializer(meal_plans, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 
-
-
-
-@api_view(['GET']) #maysiraulo ka
-@permission_classes([IsAuthenticated])
-def get_dietary_filters(request):
-    all_tags = Recipe.objects.values_list('dietary_tags', flat=True)
-
-    unique_tags = set()
-    for tags in all_tags:
-        if isinstance(tags, list):  # Ensure it's a list
-            unique_tags.update(tags)  # Add all tags to the set
-
-    available_filters = list(unique_tags)
-
-    if not available_filters:
-        return Response(
-            {"message": "No dietary filters available", "available_filters": []},
-            status=status.HTTP_200_OK
-        )
-
-    return Response({"available_filters": available_filters}, status=status.HTTP_200_OK)
-
-
 class RecipeReviewView(APIView):
     permission_classes = [permissions.IsAuthenticated]
-
     def get(self, request, recipe_id):
-        """Retrieve all reviews for a recipe, handling missing recipes and empty reviews."""
-        # ✅ Check if the recipe exists
         if not Recipe.objects.filter(id=recipe_id).exists():
             return Response({"error": "Recipe not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        # ✅ Get all reviews for the recipe
         reviews = RecipeReview.objects.filter(recipe_id=recipe_id)
-
-        # ⚠️ No reviews yet
         if not reviews.exists():
             return Response({"message": "No ratings yet"}, status=status.HTTP_200_OK)
-
-        # ✅ Return reviews
         serializer = RecipeReviewSerializer(reviews, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request, recipe_id):
-        """Create a new review for a recipe, ensuring recipe exists and user is set."""
-        # ✅ Check if the recipe exists before adding a review
         try:
             recipe = Recipe.objects.get(id=recipe_id)
         except Recipe.DoesNotExist:
             return Response({"error": "Recipe not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        # ✅ Ensure recipe ID is in the request data
         request.data["recipe"] = recipe_id
-
-        # ✅ Validate and save with authenticated user
         serializer = RecipeReviewSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
-            serializer.save(user=request.user, recipe=recipe)  # Ensure the correct recipe is used
+            serializer.save(user=request.user, recipe=recipe)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
@@ -150,7 +122,6 @@ def search_by_nutrition(request):
     goal = request.query_params.get('goal', '').lower()
     recipes = Recipe.objects.all()
     filtered_recipes = []
-
     for recipe in recipes:
         if isinstance(recipe.nutrition, dict):
             try:
@@ -172,109 +143,80 @@ def search_by_nutrition(request):
                     filtered_recipes.append(recipe)
                 elif goal == 'high-carbs' and carbs >= 30:
                     filtered_recipes.append(recipe)
-
             except ValueError:
                 continue
-
     if not filtered_recipes:
         return Response({"message": f"No recipes found for goal: '{goal}'"}, status=status.HTTP_200_OK)
-
     serializer = RecipeSerializer(filtered_recipes, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # 🔐 Require JWT authentication
+@permission_classes([IsAuthenticated])
 def get_meal_history(request):
-    user = request.user  # ✅ Get authenticated user
-
-    # Fetch only the user's meal plans
+    user = request.user
     meal_plans = MealPlan.objects.filter(user=user).order_by('-date')
     if not meal_plans.exists():
         return Response({"detail": "No meal history found."}, status=status.HTTP_404_NOT_FOUND)
 
     meal_plan_serializer = MealPlanSerializer(meal_plans, many=True)
-
-    # Get recipe IDs from the user's meal history
     recipe_ids = meal_plans.values_list('recipes', flat=True)
-
-    # Recommend recipes NOT already in the user's history
     recommended_recipes = Recipe.objects.exclude(id__in=recipe_ids).annotate(
         rating_count=Count('rating')
     ).order_by('-rating', '-rating_count')[:5]
-
     recommended_serializer = RecipeSerializer(recommended_recipes, many=True)
-
     return Response({
         "meal_history": meal_plan_serializer.data,
         "recommended_recipes": recommended_serializer.data
     }, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # 🔐 Require JWT authentication
+@permission_classes([IsAuthenticated])
 def suggest_recipes_from_leftovers(request):
     data = request.data
     leftovers = data.get('ingredients', [])
-
     if not leftovers:
         return Response({
             "detail": "No leftover ingredients provided."
         }, status=status.HTTP_400_BAD_REQUEST)
-
-    # Convert leftovers to lowercase and strip whitespace
     leftovers = [ingredient.lower().strip() for ingredient in leftovers]
-
-    # 🛠️ Handling JSONField correctly (if ingredients are stored as lists)
     suggested_recipes = Recipe.objects.filter(
-        ingredients__icontains=leftovers[0]  # At least match the first ingredient
+        ingredients__icontains=leftovers[0]
     ).distinct()
-
-    # 🔍 Improved Matching: If more than one ingredient, refine search
     if len(leftovers) > 1:
         for ingredient in leftovers[1:]:
             suggested_recipes = suggested_recipes.filter(ingredients__icontains=ingredient)
-
     if not suggested_recipes.exists():
         return Response({
             "detail": "No recipes found using the provided ingredients."
         }, status=status.HTTP_404_NOT_FOUND)
-
-    # Serialize the results
     serializer = RecipeSerializer(suggested_recipes, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Require authentication
+@permission_classes([IsAuthenticated])
 def generate_shopping_list(request):
-    user = request.user  # JWT Authenticated User
+    user = request.user
     start_date = timezone.now().date()
     end_date = start_date + timedelta(days=7)
-
-    # Get meal plans for the current week
     meal_plans = MealPlan.objects.filter(user=user, date__range=[start_date, end_date])
-
     if not meal_plans.exists():
         return Response({
             "detail": "No meal plans found for the current week."
         }, status=status.HTTP_404_NOT_FOUND)
-
-    # Collect all ingredients from recipes in the meal plans
     shopping_list = {}
     for meal_plan in meal_plans:
         for recipe in meal_plan.recipes.all():
-            ingredients = recipe.ingredients.split(',')  # Assuming ingredients are comma-separated
+            ingredients = recipe.ingredients.split(',')
             for ingredient in ingredients:
                 ingredient = ingredient.strip()
                 if ingredient in shopping_list:
                     shopping_list[ingredient] += 1
                 else:
                     shopping_list[ingredient] = 1
-
-    # Format the shopping list
     formatted_list = [{"ingredient": item, "quantity": quantity} for item, quantity in shopping_list.items()]
-
     return Response({
         "shopping_list": formatted_list
     }, status=status.HTTP_200_OK)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Require authentication
+@permission_classes([IsAuthenticated])
 def get_nutritional_summary(request, recipe_id):
     try:
         recipe = Recipe.objects.get(pk=recipe_id)
@@ -313,7 +255,6 @@ def get_ingredient_substitute(request, ingredient):
             "substitutes": ["No substitutes found."]
         }, status=status.HTTP_404_NOT_FOUND)
 
-# ✅ Add new ingredient substitutes (JWT Protected)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def add_ingredient_substitute(request):
@@ -323,7 +264,7 @@ def add_ingredient_substitute(request):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # Requires JWT authentication
+@permission_classes([IsAuthenticated])
 def rate_recipe(request, id):
     try:
         recipe = Recipe.objects.get(id=id)
@@ -341,90 +282,63 @@ def rate_recipe(request, id):
             raise ValueError
     except ValueError:
         return Response({'detail': 'Rating must be a number between 0 and 5.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Update the rating (a more advanced approach could use a weighted average)
     recipe.rating = new_rating
     recipe.save()
-
     serializer = RecipeSerializer(recipe)
     return Response(serializer.data, status=status.HTTP_200_OK)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Requires JWT authentication
+@permission_classes([IsAuthenticated])
 def get_popular_recipes(request):
-    # Fetch popular recipes based on rating and favorites count
     recipes = Recipe.objects.annotate(
         favorites_count=Count('favorites')
-    ).order_by('-rating', '-favorites_count')[:10]  # Limit to top 10 popular recipes
-
+    ).order_by('-rating', '-favorites_count')[:10]
     serializer = RecipeSerializer(recipes, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # Requires JWT authentication
+@permission_classes([IsAuthenticated])
 def add_to_favorites(request, id):
     try:
         recipe = Recipe.objects.get(id=id)
     except Recipe.DoesNotExist:
         return Response({"detail": "Recipe not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    # Check if the recipe is already in favorites
     if recipe.favorites.filter(id=request.user.id).exists():
         return Response({"detail": "Recipe is already in favorites."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Add the recipe to user's favorites
     recipe.favorites.add(request.user)
     return Response({"detail": "Recipe added to favorites."}, status=status.HTTP_200_OK)
 
+
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # Require JWT authentication
-def get_dietary_filters(request):
-    filters = DietaryFilter.objects.all()
-    serializer = DietaryFilterSerializer(filters, many=True)
-    return Response(serializer.data, status=status.HTTP_200_OK)
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])  # ✅ Requires authentication
+@permission_classes([IsAuthenticated])
 def get_today_meal_plan(request):
     today = timezone.now().date()
-    user = request.user  # ✅ Authenticated user
-
-    # Fetch meal plan for today (for the authenticated user)
+    user = request.user
     meal_plan = MealPlan.objects.filter(user=user, date=today).first()
-
     if not meal_plan:
         return Response({'detail': 'No meal plan found for today.'}, status=status.HTTP_404_NOT_FOUND)
-
     serializer = MealPlanSerializer(meal_plan)
     return Response(serializer.data, status=status.HTTP_200_OK)
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])  # ✅ Requires authentication
+@permission_classes([IsAuthenticated])
 def weekly_meal_plan(request):
     data = request.data
     start_date_str = data.get("start_date")
-
-    # Ensure start_date is provided
     if not start_date_str:
         return Response({"error": "Start date is required."}, status=status.HTTP_400_BAD_REQUEST)
-
     try:
-        start_date = date.fromisoformat(start_date_str)  # ✅ Parse string to date format (YYYY-MM-DD)
+        start_date = date.fromisoformat(start_date_str)
     except ValueError:
         return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
-
-    user = request.user  # ✅ Authenticated user
+    user = request.user
     meal_plans = []
-
     for i in range(7):
         meal_date = start_date + timedelta(days=i)
-        recipes = Recipe.objects.order_by('?')[:3]  # ✅ Randomly select 3 recipes
-
+        recipes = Recipe.objects.order_by('?')[:3]
         if not recipes.exists():
             return Response({"error": "No recipes available to create meal plan."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # ✅ Create meal plan for each day
         meal_plan = MealPlan.objects.create(user=user, date=meal_date)
         meal_plan.recipes.set(recipes)
         meal_plan.save()
         meal_plans.append(meal_plan)
-
     serializer = MealPlanSerializer(meal_plans, many=True)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 class RecipeRecommendationsView(APIView):
@@ -432,19 +346,11 @@ class RecipeRecommendationsView(APIView):
 
     def get(self, request, id):
         try:
-            # Get the base recipe
             base_recipe = Recipe.objects.get(id=id)
-
-            # Fetch other recipes excluding the base recipe
             other_recipes = Recipe.objects.exclude(id=id)
-
-            # Provide up to 3 random recommendations
             recommended_recipes = random.sample(list(other_recipes), min(3, other_recipes.count()))
-
-            # Serialize and return the recommended recipes
             serializer = RecipeSerializer(recommended_recipes, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
-
         except Recipe.DoesNotExist:
             return Response({"detail": "Recipe not found."}, status=status.HTTP_404_NOT_FOUND)
 class RecipeNutritionView(APIView):
@@ -453,7 +359,7 @@ class RecipeNutritionView(APIView):
     def get(self, request, id):
         try:
             recipe = Recipe.objects.get(id=id)
-            nutrition = recipe.nutrition  # Ensure this is stored as JSON in your model
+            nutrition = recipe.nutrition
             return Response(nutrition, status=status.HTTP_200_OK)
         except Recipe.DoesNotExist:
             return Response({"detail": "Recipe not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -470,7 +376,7 @@ class RecipeListView(generics.ListAPIView):
     serializer_class = RecipeSerializer
     permission_classes = [IsAuthenticated]
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])  # 🔒 Requires JWT authentication
+@permission_classes([IsAuthenticated])
 def random_recipe(request):
     recipes = Recipe.objects.all()
 
@@ -523,7 +429,6 @@ class RecipeSearchByIngredientsView(APIView):
         for ingredient in ingredient_list[1:]:
             recipes = recipes.filter(ingredients__icontains=ingredient)
 
-        # Return "No available" if no recipes match
         if not recipes.exists():
             return Response({"message": "No available"}, status=200)
 
@@ -531,22 +436,18 @@ class RecipeSearchByIngredientsView(APIView):
         return Response(serializer.data)
 
 
-# Create your views here.
+
 class MealPlanCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        """
-        Create a meal plan for a specific day based on dietary preferences.
-        """
         data = request.data
         dietary_preference = data.get("dietary_preference", "").lower()
-        date = data.get("date")  # Expected format: YYYY-MM-DD
+        date = data.get("date")
 
         if not date:
             return Response({"error": "Date is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Filter recipes based on dietary preference
         if dietary_preference:
             recipes = Recipe.objects.filter(dietary_tags__icontains=dietary_preference)
         else:
@@ -555,8 +456,7 @@ class MealPlanCreateView(APIView):
         if not recipes.exists():
             return Response({"error": "No recipes found for the given dietary preference"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Select random recipes for the meal plan
-        meal_plan = random.sample(list(recipes), min(3, len(recipes)))  # Select up to 3 recipes
+        meal_plan = random.sample(list(recipes), min(3, len(recipes)))
 
         serializer = MealPlanSerializer(meal_plan, many=True)
         return Response({
